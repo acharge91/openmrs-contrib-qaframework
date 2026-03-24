@@ -11,6 +11,6 @@ import lombok.Setter;
 @NoArgsConstructor
 public class TitanResponse {
 
-    public Float[] embedding;
+    public float[] embedding;
     public int inputTextTokenCount;
 }

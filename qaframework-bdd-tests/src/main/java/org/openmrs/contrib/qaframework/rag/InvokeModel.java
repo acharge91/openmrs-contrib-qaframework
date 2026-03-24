@@ -8,27 +8,26 @@ import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
+import software.amazon.awssdk.services.bedrockruntime.model.BedrockRuntimeException;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
+
+import static org.junit.Assert.fail;
 
 public class InvokeModel {
 
-    private static final Gson gson = new GsonBuilder().serializeNulls().create();
+    private final Gson gson = new GsonBuilder().serializeNulls().create();
 
-    public static TitanResponse invokeModel(String requestChunk) {
+    private BedrockRuntimeClient client = null;
 
-        // Create a Bedrock Runtime client in the AWS Region you want to use.
-        // Replace the DefaultCredentialsProvider with your preferred credentials provider.
-        BedrockRuntimeClient client = BedrockRuntimeClient.builder()
-                .credentialsProvider(DefaultCredentialsProvider.create())
-                .region(Region.US_EAST_1) //TODO add correct region
-                .build();
+    public InvokeModel() {
+        client = getBedrockClient();
+    }
 
+    public TitanResponse invokeModel(String requestChunk) {
         // Set the model ID, e.g., Titan Text Embeddings V2.
         String modelId = "amazon.titan-embed-text-v1";
 
         // The InvokeModel API uses the model's native payload.
-        // Learn more about the available inference parameters and response fields at:
-        // https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-embed-text.html
         String nativeRequestTemplate = "{ \"inputText\": \"{{inputText}}\", \"normalize\": true }";
 
         // Embed the prompt in the model's native request payload.
@@ -45,8 +44,26 @@ public class InvokeModel {
 
         } catch (SdkClientException e) {
             System.err.printf("ERROR: Can't invoke '%s'. Reason: %s", modelId, e.getMessage());
+            closeClient();
+            throw new RuntimeException(e);
+        } catch (BedrockRuntimeException e) {
+            System.out.printf("Bedrock runtime ERROR. Status code: %s. Reason: %s", e.statusCode(), e.getMessage());
+            closeClient();
             throw new RuntimeException(e);
         }
+    }
+
+    private BedrockRuntimeClient getBedrockClient() {
+        // Create a Bedrock Runtime client in the AWS Region you want to use.
+        // Replace the DefaultCredentialsProvider with your preferred credentials provider.
+        return BedrockRuntimeClient.builder()
+                .credentialsProvider(DefaultCredentialsProvider.create())
+                .region(Region.EU_WEST_1) //TODO add correct region
+                .build();
+    }
+
+    public void closeClient() {
+        client.close();
     }
 }
 
