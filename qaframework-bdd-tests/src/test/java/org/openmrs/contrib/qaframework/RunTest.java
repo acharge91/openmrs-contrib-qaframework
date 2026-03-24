@@ -88,5 +88,7 @@ public class RunTest {
 		public static final String SELENIUM_PHONE_NUMBER_VALIDATION = SELENIUM + " and " + PHONE_NUMBER_VALIDATION;
 		public static final String SELENIUM_SERVICE = SELENIUM + " and " + SERVICE;
 		public static final String SELENIUM_LOCATION_MANAGEMENT = SELENIUM + " and " + LOCATION;
+		public static final String PATIENT_SEARCH_VERIFICATION = "@patientSearchVerification";
+		public static final String SELENIUM_PATIENT_SEARCH_VERIFICATION = SELENIUM + " and " + PATIENT_SEARCH_VERIFICATION;
 	}
 }
