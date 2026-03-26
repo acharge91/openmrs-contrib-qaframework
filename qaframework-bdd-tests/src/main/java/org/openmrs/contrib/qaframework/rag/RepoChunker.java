@@ -8,13 +8,21 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class RepoChunker {
@@ -28,9 +36,14 @@ public class RepoChunker {
     public List<TextSegment> chunkRepo() {
         List<TextSegment> textChunks = new ArrayList<>();
         try (Stream<Path> walkFiles = Files.walk(repoRootPath)){
-            walkFiles.filter(p -> p.toString().contains("/src/") && (p.toString().endsWith(".java") ||
-                    p.toString().endsWith(".properties") ||
-                    p.toString().endsWith(".feature")) && !p.toString().contains("/target/"))
+            walkFiles.filter(p -> p.toString().contains("qaframework-bdd-tests") &&
+                            !p.toString().contains("/rag/") &&
+                            !p.toString().contains("/target/") &&
+                            (p.toString().contains("pom.xml") ||
+                            (p.toString().contains("/src/") &&
+                            (p.toString().endsWith(".java") ||
+                            p.toString().endsWith(".properties") ||
+                            p.toString().endsWith(".feature")))))
                     .forEach(path -> {
                 textChunks.addAll(chunkFile(path));
             });
@@ -94,7 +107,10 @@ public class RepoChunker {
                     } else if (inBackground && !line.isBlank() && !line.startsWith("@")) {
                         // accumulate background steps
                         fullBackgroundList.add(line);
-                    } else if (!line.startsWith("@") && !line.startsWith("Feature") && !line.startsWith("Scenario") && !line.startsWith("Background") && !line.isBlank()) {
+                    } else if (!line.startsWith("@") 
+                            && !line.startsWith("Feature") 
+                            && !line.startsWith("Scenario") 
+                            && !line.startsWith("Background") && !line.isBlank()) {
                         fullScenarioList.add(line);
                     }
                 }
@@ -103,6 +119,36 @@ public class RepoChunker {
                     List<String> fullChunk = new ArrayList<>(fullBackgroundList);
                     fullChunk.addAll(fullScenarioList);
                     textChunks.add(new TextSegment(String.join("\n", fullChunk), metadata));
+                }
+            } else if (path.toString().contains("pom.xml")) {
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                Document pomDocument;
+                try {
+                    DocumentBuilder builder = factory.newDocumentBuilder();
+                    pomDocument = builder.parse(path.toFile());
+                } catch (ParserConfigurationException | SAXException e) {
+                    throw new RuntimeException(e);
+                }
+                Metadata propertiesMetadata = new Metadata();
+                propertiesMetadata.put("type", classifyFile(path.toString()));
+                propertiesMetadata.put("file", path.getFileName().toString());
+                propertiesMetadata.put("section", "properties");
+                HashMap<String, String> propertiesHashmap = getPropertiesHashMap(pomDocument);
+                String propertiesString = propertiesHashmap.keySet().stream()
+                        .map(key -> key + "=" + propertiesHashmap.get(key))
+                        .collect(Collectors.joining("\n"));
+                if (!propertiesString.isBlank()) {
+                    TextSegment propertiesSegment = new TextSegment(propertiesString, propertiesMetadata);
+                    textChunks.add(propertiesSegment);
+                }
+                NodeList dependencies = pomDocument.getElementsByTagName("dependency");
+                for (int i = 0; i < dependencies.getLength(); i++) {
+                    Metadata dependencyMetadata = new Metadata();
+                    dependencyMetadata.put("type", classifyFile(path.toString()));
+                    dependencyMetadata.put("file", path.getFileName().toString());
+                    dependencyMetadata.put("section", "dependency");
+                    TextSegment dependencySegment = new TextSegment(getDependencyData(dependencies.item(i), dependencyMetadata, propertiesHashmap), dependencyMetadata);
+                    textChunks.add(dependencySegment);
                 }
             }
         } catch (IOException e) {
@@ -120,6 +166,7 @@ public class RepoChunker {
         if (path.contains("properties")) return "properties";
         if (path.contains("TestData"))   return "test_data";
         if (path.contains("TestBase"))   return "test_base";
+        if (path.contains("pom.xml"))    return "build_config";
         return "java_source";
     }
 
@@ -149,6 +196,48 @@ public class RepoChunker {
             textChunks.add(new TextSegment(methodCodeAsString, javaMetadata));
         });
         return textChunks;
+    }
+
+    private HashMap<String, String> getPropertiesHashMap(Document document) {
+        HashMap<String, String> propertiesHash = new HashMap<>();
+        org.w3c.dom.Node propertiesNode = document.getElementsByTagName("properties").item(0);
+        if (propertiesNode != null) {
+            NodeList propertiesList = propertiesNode.getChildNodes();
+            for (int i = 0; i < propertiesList.getLength(); i++) {
+                if (propertiesList.item(i).getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+                    propertiesHash.put(propertiesList.item(i).getNodeName(), propertiesList.item(i).getTextContent());
+                }
+            }
+        }
+        return propertiesHash;
+    }
+
+    private String getDependencyData(org.w3c.dom.Node dependencyNode, Metadata metadata, HashMap<String, String> propertiesHashmap) {
+        ArrayList<String> attributeList = new ArrayList<>();
+        String artifactId = "";
+        org.w3c.dom.NodeList childNodes = dependencyNode.getChildNodes();
+        for (int i = 0; i < childNodes.getLength(); i++) {
+            org.w3c.dom.Node attributeNode = childNodes.item(i);
+            if(attributeNode.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+                if (attributeNode.getTextContent().startsWith("${") && attributeNode.getTextContent().endsWith("}")) {
+                    String placeHolderString = attributeNode.getTextContent().substring(2, attributeNode.getTextContent().length() - 1);
+                    String actualAttribute = propertiesHashmap.getOrDefault(placeHolderString, attributeNode.getTextContent());
+                    attributeList.add(attributeNode.getNodeName() + "=" + actualAttribute);
+                    if (attributeNode.getNodeName().equals("artifactId")) {
+                        artifactId = actualAttribute;
+                    }
+                } else {
+                    attributeList.add(attributeNode.getNodeName() + "=" + attributeNode.getTextContent());
+                    if (attributeNode.getNodeName().equals("artifactId")) {
+                        artifactId = attributeNode.getTextContent();
+                    }
+                }
+            }
+        }
+        String attributesString = String.join("\n", attributeList);
+        metadata.put("artifactId", artifactId);
+
+        return attributesString;
     }
 
 }

@@ -13,13 +13,14 @@ import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 
 import static org.junit.Assert.fail;
 
-public class InvokeModel {
+public class InvokeTitan {
 
-    private final Gson gson = new GsonBuilder().serializeNulls().create();
+    private final Gson gson;
 
     private BedrockRuntimeClient client = null;
 
-    public InvokeModel() {
+    public InvokeTitan() {
+        this.gson = new GsonBuilder().serializeNulls().create();
         client = getBedrockClient();
     }
 
@@ -27,7 +28,7 @@ public class InvokeModel {
         // Set the model ID, e.g., Titan Text Embeddings V2.
         String modelId = "amazon.titan-embed-text-v1";
 
-        // The InvokeModel API uses the model's native payload.
+        // The InvokeTitan API uses the model's native payload.
         String nativeRequestTemplate = "{ \"inputText\": \"{{inputText}}\", \"normalize\": true }";
 
         // Embed the prompt in the model's native request payload.

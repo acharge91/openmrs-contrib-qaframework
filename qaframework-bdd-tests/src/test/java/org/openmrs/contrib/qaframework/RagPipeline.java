@@ -1,8 +1,7 @@
 package org.openmrs.contrib.qaframework;
 
 import dev.langchain4j.data.segment.TextSegment;
-import org.openmrs.contrib.qaframework.rag.RepoChunker;
-import org.openmrs.contrib.qaframework.rag.VectorEmbedding;
+import org.openmrs.contrib.qaframework.rag.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,7 +13,7 @@ import java.util.stream.Collectors;
 public class RagPipeline {
     public static void main(String[] args) {
         List<TextSegment> textChunks = null;
-        File queryFile = new File("qaframework-bdd-tests/src/test/resources/features/refapp-2.x/05-location/addLocationWithAttributeType.feature");
+        File queryFile = new File("qaframework-bdd-tests/src/test/resources/features/rag/addLocationWithAttributeType.feature");
         String queryString = "";
         RepoChunker chunker = new RepoChunker("/Users/acharge/Deloitte/openmrs-contrib-qaframework");
         try {
@@ -25,17 +24,26 @@ public class RagPipeline {
             throw new RuntimeException(e);
         }
         VectorEmbedding vectorEmbedding = new VectorEmbedding(textChunks, queryString);
-//        vectorEmbedding.embedVectors();
-//        String contextString = vectorEmbedding.findRelevantContext();
-        String contextString = "";
+        vectorEmbedding.embedVectors(); //TODO - connect to actual Bedrock
+        String queryContextString = vectorEmbedding.findGherkinQueryContext();
+//        String queryContextString = "";
+        String buildContextString = vectorEmbedding.findBuildContext();
+        String prompt = PromptBuilder.buildPrompt(queryContextString, buildContextString, queryString);
+//        InvokeClaude invokeClaude = new InvokeClaude(prompt);
+//        String claudeResponse = invokeClaude.invokeModel().getCompletion();
+//        invokeClaude.closeClient();
+        //TODO - something with the response once access to Bedrock established
+        InvokeClaudeMock invokeClaudeMock = new InvokeClaudeMock(prompt);
+        String claudeMessage = invokeClaudeMock.invokeModel();
+
         try {
-            writeDiagnosticReport(textChunks, queryString, contextString);
+            writeDiagnosticReport(textChunks, prompt, claudeMessage);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write diagnostic report", e);
         }
     }
 
-    public static void writeDiagnosticReport(List<TextSegment> chunks, String queryString, String contextString) throws IOException {
+    public static void writeDiagnosticReport(List<TextSegment> chunks, String prompt, String claudeResponse) throws IOException {
         StringBuilder report = new StringBuilder();
 
         // --- SECTION 1: CHUNKS ---
@@ -48,17 +56,17 @@ public class RagPipeline {
                 "PREVIEW: " + c.text().substring(0, Math.min(200, c.text().length())) + "\n---\n"
         ).collect(Collectors.joining())).append("\n");
 
-        // --- SECTION 2: QUERY STRING ---
+        // --- SECTION 2: PROMPT STRING ---
         report.append("=".repeat(80)).append("\n");
-        report.append("QUERY (feature file contents used to search the vector store):\n");
+        report.append("PROMPT full prompt gathered and formated from vector search:\n");
         report.append("=".repeat(80)).append("\n");
-        report.append(queryString).append("\n\n");
+        report.append(prompt).append("\n\n");
 
-        // --- SECTION 3: RETRIEVED CONTEXT ---
+        // --- SECTION 3: CLAUDE RESPONSE ---
         report.append("=".repeat(80)).append("\n");
-        report.append("RETRIEVED CONTEXT (top chunks returned by vector store similarity search):\n");
+        report.append("CLAUDE RESPONSE:\n");
         report.append("=".repeat(80)).append("\n");
-        report.append(contextString).append("\n\n");
+        report.append(claudeResponse).append("\n\n");
 
         Files.writeString(Paths.get("diagnostic-report.txt"), report.toString());
         System.out.println("Diagnostic report written to diagnostic-report.txt");
